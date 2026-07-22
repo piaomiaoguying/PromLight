@@ -39,7 +39,7 @@ clang --version
 ### 一键安装
 
 ```bash
-cd /Users/zs/Applications/PromLight
+cd /path/to/PromLight
 chmod +x promlight-init.sh
 ./promlight-init.sh install
 ```
@@ -234,7 +234,7 @@ tail -f /Users/zs/Applications/PromLight/native_daemon/daemon.log
 ## Git 管理
 
 ```bash
-cd /Users/zs/Applications/PromLight
+cd /path/to/PromLight
 git init
 git add .
 git commit -m "Initial commit"

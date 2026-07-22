@@ -7,7 +7,7 @@
     <string>com.promlight.daemon</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/zs/Applications/PromLight/native_daemon/promlightd</string>
+        <string>/Users/zs/Applications/PromLight/native_daemon/promlightd.sh</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Users/zs/Applications/PromLight/native_daemon</string>
@@ -15,10 +15,6 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
-    <key>StandardOutPath</key>
-    <string>/Users/zs/Applications/PromLight/native_daemon/daemon.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/zs/Applications/PromLight/native_daemon/daemon.log</string>
     <key>ThrottleInterval</key>
     <integer>5</integer>
 </dict>

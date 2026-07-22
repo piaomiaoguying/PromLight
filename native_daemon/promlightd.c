@@ -273,12 +273,11 @@ static bool config_load(Config *cfg) {
     const char *paths[] = {
         "events.json",
         "../events.json",
-        "/Users/zs/Applications/PromLight/events.json",
         "~/.promlight/events.json",
         "/etc/promlight/events.json",
     };
 
-    for (int pi = 0; pi < 5; pi++) {
+    for (int pi = 0; pi < 4; pi++) {
         char path[MAX_PATH];
         const char *src = paths[pi];
         if (src[0] == '~') {
