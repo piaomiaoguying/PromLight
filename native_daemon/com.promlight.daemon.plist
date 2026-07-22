@@ -7,10 +7,10 @@
     <string>com.promlight.daemon</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/zs/Applications/PromLight/native_daemon/promlightd.sh</string>
+        <string>/Users/zs/工作/py/PromLight/native_daemon/promlightd.sh</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/zs/Applications/PromLight/native_daemon</string>
+    <string>/Users/zs/工作/py/PromLight/native_daemon</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
