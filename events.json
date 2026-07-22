@@ -1,0 +1,41 @@
+{
+  "macros": {
+    "working": "led green blink --only",
+    "idle": "led all blink --freq 1500 --fade 500 --count 60",
+    "awaiting": "led yellow blink --only",
+    "waiting": "led yellow on --only",
+    "error": "led red blink --only",
+    "off": "led all off",
+    "start": "led all blink --only --count 2 ; led all blink --freq 1500 --fade 500 --count 5",
+    "end": "led all off"
+  },
+  "events": {
+    "SessionStart": "start",
+    "UserPromptSubmit": "working",
+    "PreToolUse": "working",
+    "PostToolUse": "working",
+    "PostToolUseFailure": "error",
+    "PermissionRequest": "awaiting",
+    "PermissionDenied": "idle",
+    "Elicitation": "waiting",
+    "SubagentStart": "working",
+    "SubagentStop": "working",
+    "PreCompact": "working",
+    "PostCompact": "working",
+    "Stop": "idle",
+    "SessionEnd": "end",
+    "StopFailure": "error",
+
+    "sessionStart": "start",
+    "beforeSubmitPrompt": "working",
+    "afterFileEdit": "working",
+    "beforeShellExecution": "awaiting",
+    "beforeMCPExecution": "awaiting",
+    "stop": "idle",
+    "sessionEnd": "end",
+
+    "userPromptSubmitted": "working",
+    "agentStop": "idle",
+    "errorOccurred": "error"
+  }
+}

@@ -1,0 +1,13 @@
+[promlight] PromLight Native Daemon v0.2 (ARM64)
+[promlight] Python: 3.13.0 (v3.13.0:60403a5409f, Oct  7 2024, 00:37:40) [Clang 15.0.0 (clang-1500.3.9.4)] on darwin
+[promlight] Found device(s): [DeviceInfo(serial='9C7F643B3B39', label='3B39', opened=False, sessions=0)]
+[promlight] C helper process started (PID=56009)
+[promlight] Helper started
+[promlight] Device opened successfully
+[promlight] CTRL socket on 127.0.0.1:47800
+[promlight] Daemon started
+[promlight]   CTRL: 127.0.0.1:47800
+[promlight]   HTTP: 127.0.0.1:7800
+[promlight] Sent initial idle state (green blink)
+[promlight] HTTP API on http://127.0.0.1:7800
+[promlight] [test-1] cmd=led yellow on --only --fade 500 -> 1 steps

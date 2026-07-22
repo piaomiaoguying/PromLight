@@ -1,0 +1,12 @@
+{
+  "aliases": {
+	  "CustomName":"DeviceSN.",
+	  "Tom":"D46C50377A40",
+	  "Jerry":"D46C50377A43"
+  },
+  "routes": {
+    "project1-dir": "Tom",
+    "project2-dir": "Jerry"
+  },
+  "default": null
+}
