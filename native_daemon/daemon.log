@@ -153,3 +153,69 @@
 [msg] session=cc-zs-69700 cmd=led green blink --only -> 1 steps
 [msg] session=cc-zs-69741 event=Stop -> cmd=led all blink --freq 1500 --fade 500 --count 60
 [msg] session=cc-zs-69741 cmd=led all blink --freq 1500 --fade 500 --count 60 -> 1 steps
+[msg] session=cc-zs-70235 event=SessionStart -> cmd=led all blink --only --count 2 ; led all blink --freq 1500 --fade 500 --count 5
+[msg] session=cc-zs-70235 cmd=led all blink --only --count 2 ; led all blink --freq 1500 --fade 500 --count 5 -> 2 steps
+[msg] session=cc-zs-70305 event=SessionEnd -> cmd=led all off
+[msg] session=cc-zs-70305 cmd=led all off -> 1 steps
+[msg] session=cc-zs-70423 event=SessionStart -> cmd=led all blink --only --count 2 ; led all blink --freq 1500 --fade 500 --count 5
+[msg] session=cc-zs-70423 cmd=led all blink --only --count 2 ; led all blink --freq 1500 --fade 500 --count 5 -> 2 steps
+[msg] session=cc-zs-70494 event=SessionEnd -> cmd=led all off
+[msg] session=cc-zs-70494 cmd=led all off -> 1 steps
+[msg] session=cc-zs-71159 event=UserPromptSubmit -> cmd=led green blink --only
+[msg] session=cc-zs-71159 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71224 event=PreToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71224 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71237 event=PostToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71237 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71335 event=PreToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71335 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71340 event=PostToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71340 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71405 event=PreToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71405 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71410 event=PostToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71410 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71492 event=PreToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71492 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71499 event=PostToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71499 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71545 event=PreToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71545 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71602 event=PostToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71602 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71634 event=PreToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71634 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71639 event=PostToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71639 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71691 event=PreToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71691 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71696 event=PostToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71696 cmd=led green blink --only -> 1 steps
+[msg] session=cc-zs-71796 event=PreToolUse -> cmd=led green blink --only
+[msg] session=cc-zs-71796 cmd=led green blink --only -> 1 steps
+[daemon] Signal 15, shutting down...
+[daemon] PromLight v0.3.0 (ARM64 native C)
+[config] Loaded 8 macros, 25 events from ../events.json
+[hid] Device opened
+[daemon] Starting servers...
+[ctrl] Listening on 127.0.0.1:47800
+[daemon] Running (ctrl=47800, http=7800)
+[http] Listening on 127.0.0.1:7800
+[msg] session=6a609dfa event=PostToolUse -> cmd=led green blink --only
+[msg] session=6a609dfa cmd=led green blink --only -> 1 steps
+[msg] session=6a609e03 event=PreToolUse -> cmd=led green blink --only
+[msg] session=6a609e03 cmd=led green blink --only -> 1 steps
+[msg] session=readme-test event=SessionStart -> cmd=led all blink --only --count 2 ; led all blink --freq 1500 --fade 500 --count 5
+[msg] session=readme-test cmd=led all blink --only --count 2 ; led all blink --freq 1500 --fade 500 --count 5 -> 2 steps
+[msg] session=6a609e03 event=PostToolUse -> cmd=led green blink --only
+[msg] session=6a609e03 cmd=led green blink --only -> 1 steps
+[msg] session=6a609e09 event=PreToolUse -> cmd=led green blink --only
+[msg] session=6a609e09 cmd=led green blink --only -> 1 steps
+[msg] session=6a609e0a event=PostToolUse -> cmd=led green blink --only
+[msg] session=6a609e0a cmd=led green blink --only -> 1 steps
+[msg] session=6a609e0e event=PreToolUse -> cmd=led green blink --only
+[msg] session=6a609e0e cmd=led green blink --only -> 1 steps
+[msg] session=6a609e0e event=PostToolUse -> cmd=led green blink --only
+[msg] session=6a609e0e cmd=led green blink --only -> 1 steps
+[msg] session=6a609e14 event=Stop -> cmd=led all blink --freq 1500 --fade 500 --count 60
+[msg] session=6a609e14 cmd=led all blink --freq 1500 --fade 500 --count 60 -> 1 steps
