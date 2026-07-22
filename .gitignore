@@ -14,3 +14,4 @@ native_daemon/daemon.log
 
 # App bundle (build output)
 PromLight.app/
+native_daemon/daemon.log

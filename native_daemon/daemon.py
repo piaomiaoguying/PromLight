@@ -137,6 +137,50 @@ class HidDevice:
         self.close()
 
 
+# ── 事件配置（events.json） ──────────────────────────────────
+CONFIG_PATHS = [
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'events.json'),
+    os.path.expanduser('~/.promlight/events.json'),
+    '/etc/promlight/events.json',
+]
+
+class EventMapper:
+    """从 events.json 加载事件→宏→命令的映射"""
+
+    def __init__(self):
+        self.macros: dict[str, str] = {}
+        self.events: dict[str, str] = {}
+        self._loaded_path = ''
+
+    def load(self) -> bool:
+        """按优先级查找并加载 events.json"""
+        for path in CONFIG_PATHS:
+            if os.path.exists(path):
+                try:
+                    with open(path) as f:
+                        data = json.load(f)
+                    self.macros = data.get('macros', {})
+                    self.events = data.get('events', {})
+                    self._loaded_path = path
+                    LOG.info("Loaded %d macros, %d events from %s",
+                             len(self.macros), len(self.events), path)
+                    return True
+                except Exception as e:
+                    LOG.error("Failed to load %s: %s", path, e)
+        LOG.warning("No events.json found (checked: %s)", ', '.join(CONFIG_PATHS))
+        return False
+
+    def resolve_event(self, event_name: str) -> str:
+        """事件名 → 宏名 → 命令字符串"""
+        macro = self.events.get(event_name, event_name)
+        cmd = self.macros.get(macro, macro)
+        return cmd
+
+    def resolve_macro(self, macro_name: str) -> str:
+        """宏名 → 命令字符串"""
+        return self.macros.get(macro_name, macro_name)
+
+
 # ── 南向帧协议（hid_atomic） ───────────────────────────────────
 class AtomicCode(enum.IntEnum):
     CMD_READ = 0x02
@@ -494,8 +538,9 @@ class DeviceManager:
 class StateMachine:
     """灯状态机 + 多 session 管理"""
 
-    def __init__(self, device_mgr: DeviceManager):
+    def __init__(self, device_mgr: DeviceManager, event_mapper: Optional[EventMapper] = None):
         self._device = device_mgr
+        self._events = event_mapper or EventMapper()
         self._lock = threading.Lock()
         self._session_states: dict[str, str] = {}
         self._current_cmd: Optional[bytes] = None
@@ -504,8 +549,14 @@ class StateMachine:
 
     def handle_event(self, cmd_text: str, message: str, session: str,
                      agent: str = '', release: bool = False, cwd: str = '',
-                     notice: str = '') -> dict:
+                     notice: str = '', event_name: str = '') -> dict:
         result = {'ok': True, 'ack': '✓', 'device': '', 'cmd': cmd_text}
+
+        # 如果没给 cmd 但有 event_name，从配置解析
+        if not cmd_text and event_name:
+            cmd_text = self._events.resolve_event(event_name)
+            result['cmd'] = cmd_text
+            LOG.info("[%s] event=%s -> cmd=%s", session[:8], event_name, cmd_text)
 
         with self._lock:
             if release:
@@ -551,13 +602,21 @@ class StateMachine:
         return result
 
     def _apply_idle_state(self):
-        """应用空闲状态（绿灯闪烁）- 先关掉所有颜色"""
-        # 先确保关掉其他颜色
+        """应用空闲状态 - 读取 events.json 的 idle/off 宏"""
+        # 先关掉所有颜色
         self._device.send_frame(build_led(LedChannel.CH_ALL, LedAction.ACT_OFF))
         time.sleep(0.05)
-        # 再设置绿色闪烁（用 only 确保独占）
-        frame = build_led(LedChannel.CH_GREEN, LedAction.ACT_BLINK, only=True)
-        self._device.send_frame(frame)
+        # 查找 events.json 中的空闲/等待宏
+        idle_cmd = self._events.resolve_macro('idle')
+        if idle_cmd == 'idle':
+            idle_cmd = 'led green blink --only'  # fallback
+        steps = compile_script(idle_cmd)
+        for step in steps:
+            if isinstance(step, bytes):
+                self._device.send_frame(step)
+            elif isinstance(step, tuple) and step[0] == 'delay':
+                time.sleep(step[1] / 1000.0)
+            time.sleep(0.05)
 
     def get_history(self, limit: int = 100) -> list[dict]:
         with self._lock:
@@ -658,6 +717,7 @@ def handle_ctrl_connection(conn, addr, state_machine: StateMachine):
             return
         payload = json.loads(data.decode('utf-8').strip())
         cmd = payload.get('cmd', '')
+        event_name = payload.get('event', '')
         message = payload.get('message', '')
         session = payload.get('session', str(uuid.uuid4()))
         agent = payload.get('agent', '')
@@ -665,10 +725,11 @@ def handle_ctrl_connection(conn, addr, state_machine: StateMachine):
         release = payload.get('release_session', False)
         notice = payload.get('notice', '')
 
-        if cmd or release:
+        if cmd or event_name or release:
             result = state_machine.handle_event(
                 cmd_text=cmd, message=message, session=session,
                 agent=agent, release=release, cwd=cwd, notice=notice,
+                event_name=event_name,
             )
             ack = json.dumps(result) + '\n'
             conn.sendall(ack.encode('utf-8'))
@@ -720,9 +781,13 @@ def main():
                   os.path.dirname(HELPER_PATH))
         sys.exit(1)
 
+    # 加载事件配置
+    event_mapper = EventMapper()
+    event_mapper.load()
+
     # 初始化
     device_mgr = DeviceManager()
-    state_machine = StateMachine(device_mgr)
+    state_machine = StateMachine(device_mgr, event_mapper)
 
     # 发现并打开设备
     devices = device_mgr.find_devices()

@@ -27,3 +27,22 @@
 [promlight] [test-2] cmd=led yellow on --only --fade 500 -> 1 steps
 [promlight] [test-2] session released
 [promlight] [unit-tes] cmd=led green blink -> 1 steps
+[promlight] PromLight Native Daemon v0.2 (ARM64)
+[promlight] Python: 3.13.0 (v3.13.0:60403a5409f, Oct  7 2024, 00:37:40) [Clang 15.0.0 (clang-1500.3.9.4)] on darwin
+[promlight] Loaded 8 macros, 25 events from /Users/zs/Applications/PromLight/native_daemon/../events.json
+[promlight] Found device(s): [DeviceInfo(serial='9C7F643B3B39', label='3B39', opened=False, sessions=0)]
+[promlight] C helper process started (PID=61202)
+[promlight] Helper started
+[promlight] Device opened successfully
+[promlight] Daemon started
+[promlight]   CTRL: 127.0.0.1:47800
+[promlight] CTRL socket on 127.0.0.1:47800
+[promlight]   HTTP: 127.0.0.1:7800
+[promlight] HTTP API on http://127.0.0.1:7800
+[promlight] Sent initial idle state (green blink)
+[promlight] [evt-test] event=UserPromptSubmit -> cmd=led green blink --only
+[promlight] [evt-test] cmd=led green blink --only -> 1 steps
+[promlight] [evt-test] event=errorOccurred -> cmd=led red blink --only
+[promlight] [evt-test] cmd=led red blink --only -> 1 steps
+[promlight] [evt-test] event=stop -> cmd=led all blink --freq 1500 --fade 500 --count 60
+[promlight] [evt-test] session released
