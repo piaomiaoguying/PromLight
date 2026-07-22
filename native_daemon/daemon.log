@@ -219,3 +219,25 @@
 [msg] session=6a609e0e cmd=led green blink --only -> 1 steps
 [msg] session=6a609e14 event=Stop -> cmd=led all blink --freq 1500 --fade 500 --count 60
 [msg] session=6a609e14 cmd=led all blink --freq 1500 --fade 500 --count 60 -> 1 steps
+[msg] session=6a609e35 event=UserPromptSubmit -> cmd=led green blink --only
+[msg] session=6a609e35 cmd=led green blink --only -> 1 steps
+[msg] session=6a609e39 event=PreToolUse -> cmd=led green blink --only
+[msg] session=6a609e39 cmd=led green blink --only -> 1 steps
+[msg] session=6a609e39 event=PostToolUse -> cmd=led green blink --only
+[msg] session=6a609e39 cmd=led green blink --only -> 1 steps
+[msg] session=6a609e4b event=PreToolUse -> cmd=led green blink --only
+[msg] session=6a609e4b cmd=led green blink --only -> 1 steps
+[msg] session=6a609e4b event=PostToolUse -> cmd=led green blink --only
+[msg] session=6a609e4b cmd=led green blink --only -> 1 steps
+[msg] session=6a609e54 event=Stop -> cmd=led all blink --freq 1500 --fade 500 --count 60
+[msg] session=6a609e54 cmd=led all blink --freq 1500 --fade 500 --count 60 -> 1 steps
+[msg] session=6a609f2e event=UserPromptSubmit -> cmd=led green blink --only
+[msg] session=6a609f2e cmd=led green blink --only -> 1 steps
+[msg] session=6a609f39 event=PreToolUse -> cmd=led green blink --only
+[msg] session=6a609f39 cmd=led green blink --only -> 1 steps
+[msg] session=6a609f39 event=PostToolUse -> cmd=led green blink --only
+[msg] session=6a609f39 cmd=led green blink --only -> 1 steps
+[msg] session=6a609f40 event=PreToolUse -> cmd=led green blink --only
+[msg] session=6a609f40 cmd=led green blink --only -> 1 steps
+[msg] session=6a609f40 event=PostToolUse -> cmd=led green blink --only
+[msg] session=6a609f40 cmd=led green blink --only -> 1 steps

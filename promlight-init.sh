@@ -178,8 +178,8 @@ cmd_status() {
 
     # binary
     if [ -f "$DAEMON_BIN" ]; then
-        local size=$(stat -f%z "$DAEMON_BIN")
-        info "Binary: $DAEMON_BIN ($((size/1024))KB)"
+        local size_kb=$(( $(wc -c < "$DAEMON_BIN") / 1024 ))
+        info "Binary: $DAEMON_BIN (${size_kb}KB)"
     else
         warn "Binary 不存在"
     fi
