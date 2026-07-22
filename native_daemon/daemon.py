@@ -551,8 +551,12 @@ class StateMachine:
         return result
 
     def _apply_idle_state(self):
-        """应用空闲状态（绿灯闪烁）"""
-        frame = build_led(LedChannel.CH_GREEN, LedAction.ACT_BLINK)
+        """应用空闲状态（绿灯闪烁）- 先关掉所有颜色"""
+        # 先确保关掉其他颜色
+        self._device.send_frame(build_led(LedChannel.CH_ALL, LedAction.ACT_OFF))
+        time.sleep(0.05)
+        # 再设置绿色闪烁（用 only 确保独占）
+        frame = build_led(LedChannel.CH_GREEN, LedAction.ACT_BLINK, only=True)
         self._device.send_frame(frame)
 
     def get_history(self, limit: int = 100) -> list[dict]:
