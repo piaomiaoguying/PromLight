@@ -468,14 +468,15 @@ static int parse_channel(const char *s) {
     int mask = 0;
     char copy[128];
     strncpy(copy, s, sizeof(copy)-1);
-    char *tok = strtok(copy, "+|,");
+    char *saveptr;
+    char *tok = strtok_r(copy, "+|,", &saveptr);
     while (tok) {
         char *t = trim(tok);
         if (strcasecmp(t, "green") == 0)  mask |= CH_GREEN;
         else if (strcasecmp(t, "yellow") == 0) mask |= CH_YELLOW;
         else if (strcasecmp(t, "red") == 0)    mask |= CH_RED;
         else if (strcasecmp(t, "all") == 0)    mask |= CH_ALL;
-        tok = strtok(NULL, "+|,");
+        tok = strtok_r(NULL, "+|,", &saveptr);
     }
     return mask;
 }
@@ -574,10 +575,11 @@ static int compile_script(const char *cmd_line, Script *script) {
     char line_copy[MAX_LINE];
     strncpy(line_copy, cmd_line, sizeof(line_copy)-1);
 
-    char *part = strtok(line_copy, ";");
+    char *saveptr;
+    char *part = strtok_r(line_copy, ";", &saveptr);
     while (part && script->count < MAX_FRAMES) {
         part = trim(part);
-        if (!*part) { part = strtok(NULL, ";"); continue; }
+        if (!*part) { part = strtok_r(NULL, ";", &saveptr); continue; }
 
         Step *step = &script->steps[script->count];
 
@@ -688,7 +690,7 @@ static int compile_script(const char *cmd_line, Script *script) {
             script->count++;
         }
 
-        part = strtok(NULL, ";");
+        part = strtok_r(NULL, ";", &saveptr);
     }
 
     return script->count;
