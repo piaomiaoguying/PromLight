@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts
+native_daemon/promlight_helper
+
+# Runtime logs
+native_daemon/daemon.log
+
+# App bundle (build output)
+PromLight.app/
