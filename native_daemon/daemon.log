@@ -241,3 +241,5 @@
 [msg] session=6a609f40 cmd=led green blink --only -> 1 steps
 [msg] session=6a609f40 event=PostToolUse -> cmd=led green blink --only
 [msg] session=6a609f40 cmd=led green blink --only -> 1 steps
+[msg] session=6a609f45 event=Stop -> cmd=led all blink --freq 1500 --fade 500 --count 60
+[msg] session=6a609f45 cmd=led all blink --freq 1500 --fade 500 --count 60 -> 1 steps
