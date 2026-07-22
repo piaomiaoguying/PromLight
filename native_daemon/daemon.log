@@ -46,3 +46,16 @@
 [promlight] [evt-test] cmd=led red blink --only -> 1 steps
 [promlight] [evt-test] event=stop -> cmd=led all blink --freq 1500 --fade 500 --count 60
 [promlight] [evt-test] session released
+[daemon] PromLight v0.3.0 (ARM64 native C)
+[config] Loaded 8 macros, 25 events from ../events.json
+[hid] Device opened
+[daemon] Starting servers...
+[daemon] Running (ctrl=47800, http=7800)
+[http] Listening on 127.0.0.1:7800
+[ctrl] Listening on 127.0.0.1:47800
+[msg] session=final-test event=UserPromptSubmit -> cmd=led green blink --only
+[msg] session=final-test cmd=led green blink --only -> 1 steps
+[msg] session=final-test event=PreToolUse -> cmd=led green blink --only
+[msg] session=final-test cmd=led green blink --only -> 1 steps
+[msg] session=final-test event=errorOccurred -> cmd=led red blink --only
+[msg] session=final-test cmd=led red blink --only -> 1 steps
