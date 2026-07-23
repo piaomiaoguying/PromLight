@@ -238,6 +238,26 @@ cmd_hooks() {
     info "Hook 配置完成"
 }
 
+# ── 亮度控制 ────────────────────────────────────────────────
+cmd_brightness() {
+    local level="${1:-}"
+    if [ -z "$level" ]; then
+        echo "用法: $0 brightness <0-100>"
+        echo "  0=灭  100=最亮"
+        exit 1
+    fi
+    if ! [ "$level" -ge 0 ] 2>/dev/null || ! [ "$level" -le 100 ] 2>/dev/null; then
+        err "亮度值必须在 0-100 之间"
+        return 1
+    fi
+    echo "设置 LED 亮度为 ${level}%..."
+    echo "{\"cmd\":\"write led.brightness ${level}\"}" | timeout 2 nc 127.0.0.1 47800 2>/dev/null || {
+        err "daemon 未运行，亮度设置失败"
+        return 1
+    }
+    info "亮度已设为 ${level}%"
+}
+
 # ── 主入口 ──────────────────────────────────────────────────
 case "${1:-install}" in
     install)  cmd_install ;;
@@ -246,6 +266,7 @@ case "${1:-install}" in
     uninstall) cmd_uninstall ;;
     hooks)    cmd_hooks ;;
     compile)  cmd_compile ;;
+    brightness) shift; cmd_brightness "$@" ;;
     *)
         echo "用法: $0 [install|restart|status|uninstall|hooks|compile]"
         exit 1

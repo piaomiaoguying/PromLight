@@ -167,6 +167,7 @@ echo '{"cmd":"led green blink --only --count 3 ; led all off"}' | nc 127.0.0.1 4
 led <channel> <action> [options]     # 控制 LED
 off                                   # 全关
 write <param> <value>                 # 写参数
+read <param>                          # 读参数
 wait <ms>                             # 延时（用于 ; 串联）
 ```
 
@@ -179,6 +180,15 @@ wait <ms>                             # 延时（用于 ; 串联）
 | `--freq Nms` | 闪烁周期（毫秒，默认 1000） |
 | `--fade Nms` | 渐入渐出时间（毫秒） |
 
+读写参数：
+
+| 参数名 | 范围 | 说明 |
+|--------|------|------|
+| `led.brightness` | 0~100 | 亮度百分比 |
+| `led.freq` | 200~5000ms | 闪烁周期 |
+| `led.fade` | 0~5000ms | 渐变时间 |
+| `ble.advtimeout` | — | BLE 广播超时 |
+
 示例：
 
 ```bash
@@ -190,6 +200,12 @@ echo '{"cmd":"led green blink --only --freq 2000 --fade 500"}' | nc 127.0.0.1 47
 
 # 红灯闪 10 次
 echo '{"cmd":"led red blink --only --count 10"}' | nc 127.0.0.1 47800
+
+# 调亮度 50%
+echo '{"cmd":"write led.brightness 50"}' | nc 127.0.0.1 47800
+
+# 读当前亮度
+echo '{"cmd":"read led.brightness"}' | nc 127.0.0.1 47800
 
 # 写参数：LED 频率 500ms
 echo '{"cmd":"write led.freq 500"}' | nc 127.0.0.1 47800
@@ -268,25 +284,13 @@ macOS ARM64 的 Python `hidapi` 对 BLE HID 设备调用 `IOHIDDeviceSetReport` 
 项目自带的管理脚本，所有操作通过它完成：
 
 ```bash
-./promlight-init.sh install     # 全量安装（编译 + hooks + launchd）
-./promlight-init.sh compile     # 仅重新编译 promlightd
-./promlight-init.sh hooks       # 重新部署 hook 脚本和配置
-./promlight-init.sh restart     # 重启 daemon
-./promlight-init.sh status      # 查看完整状态
-./promlight-init.sh uninstall   # 卸载
-```
-
-### promlight-init.sh
-
-项目自带的管理脚本，所有操作通过它完成：
-
-```bash
-./promlight-init.sh install     # 全量安装（编译 + hooks + launchd）
-./promlight-init.sh compile     # 仅重新编译 promlightd
-./promlight-init.sh hooks       # 重新部署 hook 脚本和配置
-./promlight-init.sh restart     # 重启 daemon
-./promlight-init.sh status      # 查看完整状态
-./promlight-init.sh uninstall   # 卸载
+./promlight-init.sh install          # 全量安装（编译 + hooks + launchd）
+./promlight-init.sh compile          # 仅重新编译 promlightd
+./promlight-init.sh hooks            # 重新部署 hook 脚本和配置
+./promlight-init.sh restart          # 重启 daemon
+./promlight-init.sh status           # 查看完整状态
+./promlight-init.sh brightness 50    # 设置 LED 亮度（0~100）
+./promlight-init.sh uninstall        # 卸载
 ```
 
 #### 开机初始化序列
