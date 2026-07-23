@@ -276,6 +276,40 @@ macOS ARM64 的 Python `hidapi` 对 BLE HID 设备调用 `IOHIDDeviceSetReport` 
 ./promlight-init.sh uninstall   # 卸载
 ```
 
+### promlight-init.sh
+
+项目自带的管理脚本，所有操作通过它完成：
+
+```bash
+./promlight-init.sh install     # 全量安装（编译 + hooks + launchd）
+./promlight-init.sh compile     # 仅重新编译 promlightd
+./promlight-init.sh hooks       # 重新部署 hook 脚本和配置
+./promlight-init.sh restart     # 重启 daemon
+./promlight-init.sh status      # 查看完整状态
+./promlight-init.sh uninstall   # 卸载
+```
+
+#### 开机初始化序列
+
+macOS 开机后 launchd 自动启动 daemon，信号灯会执行 `idle` 动画（三色渐变）。登录后执行以下完整的初始化流程（重启 daemon + 安装 hooks + 闪灯确认）：
+
+```bash
+cd /Users/zs/工作/py/PromLight
+./promlight-init.sh restart
+./promlight-init.sh hooks
+sleep 3
+./promlight-init.sh status
+echo '{"cmd":"led all blink --only --count 5"}' | timeout 1 nc -w 1 127.0.0.1 47800 2>/dev/null || true
+```
+
+步骤说明：
+
+1. **`restart`** — 重启 daemon，重新加载 `events.json`
+2. **`hooks`** — 重新安装 Claude Code hook 脚本和配置
+3. **`sleep 3`** — 等待 daemon 启动完成、蓝牙 HID 连接就绪
+4. **`status`** — 确认 daemon 运行正常
+5. **闪灯确认** — 三色灯同时闪烁 5 次后自动熄灭，表示初始化完成
+
 ### 手动管理
 
 ```bash
