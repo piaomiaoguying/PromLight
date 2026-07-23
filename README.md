@@ -17,7 +17,6 @@
 - [配置](#配置)
 - [使用](#使用)
 - [架构](#架构)
-- [命令参考](#命令参考)
 - [管理](#管理)
 - [文件清单](#文件清单)
 - [FAQ](#faq)
@@ -379,20 +378,6 @@ macOS ARM64 的 Python `hidapi` 对 BLE HID 设备调用 `IOHIDDeviceSetReport` 
 
 ## 管理
 
-### promlight-init.sh
-
-项目自带的管理脚本，所有操作通过它完成：
-
-```bash
-./promlight-init.sh install          # 全量安装（编译 + hooks + launchd）
-./promlight-init.sh compile          # 仅重新编译 promlightd
-./promlight-init.sh hooks            # 重新部署 hook 脚本和配置
-./promlight-init.sh restart          # 重启 daemon
-./promlight-init.sh status           # 查看完整状态
-./promlight-init.sh brightness 50    # 设置 LED 亮度（0~100）
-./promlight-init.sh uninstall        # 卸载
-```
-
 #### 开机初始化序列
 
 macOS 开机后 launchd 自动启动 daemon，信号灯会执行 `idle` 动画（三色渐变）。登录后执行以下完整的初始化流程（重启 daemon + 安装 hooks + 闪灯确认）：
@@ -451,8 +436,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.promlight.daemon.pli
 |------|------|
 | `native_daemon/promlightd.c` | C 源码（ARM64 daemon，~1000 行） |
 | `native_daemon/promlightd` | 编译好的 ARM64 二进制（~72KB） |
-| `native_daemon/promlightd.sh` | Launchd wrapper 脚本（自动定位二进制路径） |
-| `native_daemon/com.promlight.daemon.plist` | Launchd 配置模板 |
+| `native_daemon/promlightd.sh` | launchd wrapper 脚本（自动定位二进制路径） |
+| `native_daemon/com.promlight.daemon.plist` | launchd 配置模板 |
 | `promlight-hook.sh` | Claude Code hook 发送器 |
 | `promlight-init.sh` | 安装/管理脚本（编译、部署、卸载） |
 | `events.json` | 事件→灯色映射配置文件（用户可编辑） |
