@@ -8,10 +8,10 @@ __pycache__/
 
 # Build artifacts
 native_daemon/promlight_helper
+native_daemon/promlightd
 
 # Runtime logs
 native_daemon/daemon.log
 
 # App bundle (build output)
 PromLight.app/
-native_daemon/daemon.log
