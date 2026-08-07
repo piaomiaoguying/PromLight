@@ -383,7 +383,7 @@ macOS ARM64 的 Python `hidapi` 对 BLE HID 设备调用 `IOHIDDeviceSetReport` 
 macOS 开机后 launchd 自动启动 daemon，信号灯会执行 `idle` 动画（三色渐变）。登录后执行以下完整的初始化流程（重启 daemon + 安装 hooks + 闪灯确认）：
 
 ```bash
-cd /Users/zs/工作/py/PromLight
+cd /path/to/PromLight
 ./promlight-init.sh restart
 ./promlight-init.sh hooks
 sleep 3
