@@ -73,8 +73,6 @@ typedef struct {
     IOHIDManagerRef manager;
     pthread_mutex_t lock;
     bool opened;
-    volatile bool stale;         // 设备引用失效，需重新枚举
-    volatile bool need_restore;  // 设备打开后需重放灯态
 } HidCtx;
 
 typedef struct {
@@ -134,30 +132,17 @@ static Config g_config = {0};
 static SessionManager g_sessions = {0};
 static volatile bool g_running = true;
 
-// 最近一次成功下发的灯态，设备重连后据此重放
-static pthread_mutex_t g_state_lock = PTHREAD_MUTEX_INITIALIZER;
-static char g_last_cmd[MAX_LINE] = {0};
-
-// 串行化整段脚本下发，避免多个会话与重放交错写帧
+// 串行化整段脚本下发，避免多个会话交错写帧
 static pthread_mutex_t g_io_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void io_lock(void)   { pthread_mutex_lock(&g_io_lock); }
 static void io_unlock(void) { pthread_mutex_unlock(&g_io_lock); }
 
-static void last_state_set(const char *cmd) {
-    if (!cmd || !*cmd) return;
-    pthread_mutex_lock(&g_state_lock);
-    strncpy(g_last_cmd, cmd, MAX_LINE-1);
-    g_last_cmd[MAX_LINE-1] = 0;
-    pthread_mutex_unlock(&g_state_lock);
-}
-
 static void apply_idle_state(void);
-static void restore_light_state(void);
 
 // ── HID I/O ────────────────────────────────────────────────
-// 设备生命周期由 IOHIDManager 的 matched/removed 回调驱动，长期持有同样的
-// manager，不随设备断开而销毁。回调全部在主 runloop 上串行执行。
+// manager 长期持有，设备增删回调只做引用维护，不做任何定时检查。
+// 真正的自愈在每次下发命令时按需触发（见 hid_send）。
 static void hid_close_device_locked(void) {
     if (g_hid.device) {
         IOHIDDeviceClose(g_hid.device, kIOHIDOptionsTypeSeizeDevice);
@@ -186,15 +171,14 @@ static void hid_attach_locked(IOHIDDeviceRef dev) {
     CFRetain(dev);
     g_hid.device = dev;
     g_hid.opened = true;
-    g_hid.need_restore = true;
     fprintf(stderr, "[hid] Device opened\n");
 }
 
-// 当设备引用失效（发送失败）后，从 manager 取当前匹配设备重新打开
-static void hid_rescan_locked(void) {
-    if (!g_hid.manager) return;
+// 从 manager 当前的匹配集合里找回设备并重新打开
+static bool hid_rescan_locked(void) {
+    if (!g_hid.manager) return false;
     CFSetRef devs = IOHIDManagerCopyDevices(g_hid.manager);
-    if (!devs) return;
+    if (!devs) return false;
 
     IOHIDDeviceRef arr[8];
     CFIndex n = CFSetGetCount(devs);
@@ -207,6 +191,7 @@ static void hid_rescan_locked(void) {
         }
     }
     CFRelease(devs);
+    return g_hid.opened;
 }
 
 static void hid_matched_cb(void *ctx, IOReturn result, void *sender, IOHIDDeviceRef dev) {
@@ -260,7 +245,8 @@ static bool hid_init(void) {
     return ok;
 }
 
-static bool hid_send(const uint8_t *data, int len) {
+// 单次下发，不做恢复
+static bool hid_send_once(const uint8_t *data, int len) {
     pthread_mutex_lock(&g_hid.lock);
     if (!g_hid.opened || !g_hid.device) {
         pthread_mutex_unlock(&g_hid.lock);
@@ -274,76 +260,32 @@ static bool hid_send(const uint8_t *data, int len) {
 
     IOReturn ret = IOHIDDeviceSetReport(g_hid.device, kIOHIDReportTypeOutput, 2, report, FRAME_SIZE);
     bool ok = (ret == kIOReturnSuccess);
-    if (!ok) {
-        fprintf(stderr, "[hid] SetReport error: %d, device stale\n", ret);
-        g_hid.stale = true;
-    }
+    if (!ok) fprintf(stderr, "[hid] SetReport error: %d\n", ret);
 
     pthread_mutex_unlock(&g_hid.lock);
     return ok;
 }
 
-// 检查当前持有的设备是否仍在 manager 的匹配集合里
-// BLE 掉线时设备可能不触发 removed 回调，只能靠这里的存活检查兜底
-static bool hid_device_present_locked(void) {
-    if (!g_hid.manager || !g_hid.device) return false;
-    CFSetRef devs = IOHIDManagerCopyDevices(g_hid.manager);
-    if (!devs) return false;
-    bool present = CFSetContainsValue(devs, g_hid.device);
-    CFRelease(devs);
-    return present;
-}
-
-// 主 runloop 每次唤醒时调用：清理失效引用、补齐设备、重放灯态
-static void hid_maintain(void) {
-    static time_t last_rescan = 0;
-    static time_t last_check = 0;
+// 下发一帧。失败（蓝牙掉线后旧引用失效）时才走恢复逻辑：
+// 丢弃当前引用、从 manager 重新找回设备并打开，然后重试一次。
+// 对端在线时这里只多一次 SetReport 成功路径，没有任何额外开销。
+static bool hid_send(const uint8_t *data, int len) {
+    if (hid_send_once(data, len)) return true;
 
     pthread_mutex_lock(&g_hid.lock);
-    bool need_rescan = g_hid.stale;
-    if (need_rescan) {
-        g_hid.stale = false;
-        fprintf(stderr, "[hid] Send failed, dropping stale device reference\n");
-        hid_close_device_locked();
-    }
-
-    // 设备已打开时每 5 秒确认一次它还在，防止掉线后继续往失效句柄写帧
-    if (g_hid.opened) {
-        time_t now = time(NULL);
-        if (now - last_check >= 5) {
-            last_check = now;
-            if (!hid_device_present_locked()) {
-                fprintf(stderr, "[hid] Device disappeared from IOKit\n");
-                hid_close_device_locked();
-            }
-        }
-    }
-
-    bool absent = !g_hid.opened;
+    fprintf(stderr, "[hid] Send failed, dropping stale device reference\n");
+    hid_close_device_locked();
+    bool reopened = hid_rescan_locked();
     pthread_mutex_unlock(&g_hid.lock);
 
-    // 发送失败后立即重扫；设备本就不可用时按 5 秒节流兜底枚举
-    bool do_rescan = need_rescan;
-    if (!do_rescan && absent) {
-        time_t now = time(NULL);
-        if (now - last_rescan >= 5) {
-            last_rescan = now;
-            do_rescan = true;
-        }
+    if (!reopened) {
+        fprintf(stderr, "[hid] No device available for retry\n");
+        return false;
     }
 
-    if (do_rescan) {
-        pthread_mutex_lock(&g_hid.lock);
-        hid_rescan_locked();
-        pthread_mutex_unlock(&g_hid.lock);
-    }
-
-    pthread_mutex_lock(&g_hid.lock);
-    bool restore = (g_hid.need_restore && g_hid.opened);
-    if (restore) g_hid.need_restore = false;
-    pthread_mutex_unlock(&g_hid.lock);
-
-    if (restore) restore_light_state();
+    bool ok = hid_send_once(data, len);
+    if (ok) fprintf(stderr, "[hid] Recovered after reconnect\n");
+    return ok;
 }
 
 // ── JSON 解析器（极简，仅解析扁平 key-value） ────────────────
@@ -869,9 +811,6 @@ static void apply_idle_state(void) {
     if (!idle_cmd || strcmp(idle_cmd, "idle") == 0) {
         idle_cmd = "led green blink --only";
     }
-    char cmd[MAX_LINE];
-    strncpy(cmd, idle_cmd, MAX_LINE-1);
-    cmd[MAX_LINE-1] = 0;
 
     io_lock();
     // All off first
@@ -881,30 +820,7 @@ static void apply_idle_state(void) {
     hid_send(off_frame, off_len);
     usleep(50000);
 
-    run_script_unlocked(cmd);
-    io_unlock();
-
-    last_state_set(cmd);
-}
-
-// ── 灯态重放 ──────────────────────────────────────────────
-// 设备断开期间灯会保持最后一帧，重连后把最后一个有效灯态重新发一遍
-static void restore_light_state(void) {
-    char cmd[MAX_LINE];
-    pthread_mutex_lock(&g_state_lock);
-    strncpy(cmd, g_last_cmd, MAX_LINE-1);
-    cmd[MAX_LINE-1] = 0;
-    pthread_mutex_unlock(&g_state_lock);
-
-    if (!cmd[0]) {
-        apply_idle_state();
-        return;
-    }
-
-    fprintf(stderr, "[hid] Restoring light state: %s\n", cmd);
-
-    io_lock();
-    run_script_unlocked(cmd);
+    run_script_unlocked(idle_cmd);
     io_unlock();
 }
 
@@ -948,9 +864,6 @@ static void handle_message(const char *json_raw, int fd) {
         compile_script(resolved_cmd, &script);
 
         fprintf(stderr, "[msg] session=%s cmd=%s -> %d steps\n", session, resolved_cmd, script.count);
-
-        // 先记住目标灯态：即便本次发送失败，设备重新打开后也会补发这一帧
-        last_state_set(resolved_cmd);
 
         io_lock();
         run_script_unlocked(resolved_cmd);
@@ -1164,13 +1077,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "[daemon] PromLight not present yet, waiting for it to appear\n");
     }
 
-    // Apply idle state（仅在设备已打开时，否则等重连回调触发重放）
-    if (g_hid.opened) {
-        pthread_mutex_lock(&g_hid.lock);
-        g_hid.need_restore = false;  // 紧接着就要直接下发 idle，无需再重放
-        pthread_mutex_unlock(&g_hid.lock);
-        apply_idle_state();
-    }
+    // Apply idle state（仅在设备已打开时；设备后到时由下一条命令触发重连）
+    if (g_hid.opened) apply_idle_state();
 
     // Start HTTP and CTRL servers
     fprintf(stderr, "[daemon] Starting servers...\n");
@@ -1183,10 +1091,9 @@ int main(int argc, char **argv) {
 
     fprintf(stderr, "[daemon] Running (ctrl=%d, http=%d)\n", ctrl_port, http_port);
 
-    // 主循环：runloop 分发给 IOKit 回调，每次唤醒顺手做一次自愈检查
+    // 主循环：只为分发给 IOKit 的设备增删回调，不做任何轮询
     while (g_running) {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, false);
-        hid_maintain();
     }
 
     pthread_mutex_lock(&g_hid.lock);

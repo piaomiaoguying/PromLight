@@ -367,7 +367,7 @@ HID 报告长度固定 64 字节，不足部分补 `0x00`。
 
 - **纯 C 实现**，直接调用 IOKit 框架的 `IOHIDDeviceSetReport`，不走系统蓝牙抽象层
 - **64 字节固定报告长度** + `kIOHIDOptionsTypeSeizeDevice` 独占模式
-- **设备热插拔自愈**：常驻 `IOHIDManager` 监听设备增删，蓝牙断连后自动失效旧引用、重连后重开设备并重放最后灯态
+- **设备热插拔自愈**：常驻 `IOHIDManager` 监听设备增删，无需重启进程；下发失败时才丢弃失效引用、重新枚举设备并重试
 - **多 session 管理**：支持同时管理多个 AI 工具的灯色状态，最后一个 session 释放后自动回到 idle
 - **ARM64 only**：当前仅支持 Apple Silicon Mac，需要 Rosetta 2 的原版 daemon 见下方 FAQ
 
@@ -466,13 +466,13 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.promlight.daemon.pli
 
 ### 蓝牙断开后回来，灯不亮？
 
-daemon 会长期持有 IOHIDManager 并监听设备增删；蓝牙断开时标记设备离线，重连后自动重新打开设备并重放最后一个灯态。
+自愈按需触发，没有轮询：每条命令正常下发就走成功路径，只有下发失败才会丢弃失效的设备引用、重新枚举并重试一次。所以蓝牙断开后回来，**下一条命令就会自动接上**，不需要重启进程或重跑初始化脚本。
 
 排查：
 
 ```bash
 curl -s http://127.0.0.1:7800/api/status   # opened=0 表示设备当前不在线
-grep '\[hid\]' native_daemon/daemon.log     # 查看 matched / removed / Restoring
+grep '\[hid\]' native_daemon/daemon.log     # 查看 matched / removed / Send failed
 ```
 
 ### 想改灯色？
