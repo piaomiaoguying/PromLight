@@ -132,6 +132,14 @@ static Config g_config = {0};
 static SessionManager g_sessions = {0};
 static volatile bool g_running = true;
 
+// 空闲退出：最后一次收到命令/请求的时间；0 表示不退出
+static volatile time_t g_last_activity = 0;
+static int g_idle_exit_secs = 1800;
+
+static void mark_activity(void) {
+    g_last_activity = time(NULL);
+}
+
 // 串行化整段脚本下发，避免多个会话交错写帧
 static pthread_mutex_t g_io_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -235,8 +243,9 @@ static bool hid_init(void) {
     IOHIDManagerRegisterDeviceRemovalCallback(g_hid.manager, hid_removed_cb, NULL);
     IOHIDManagerScheduleWithRunLoop(g_hid.manager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
 
-    // 让 manager 完成首次枚举；设备已存在时 matched 回调通常会在这里把设备打开
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, false);
+    // 让 manager 完成首次枚举；设备已存在时 matched 回调通常会在这里把设备打开。
+    // 冷启动由 hook 触发，等待时间要短，0.25s 足够回调完成一次设备匹配。
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, false);
 
     pthread_mutex_lock(&g_hid.lock);
     if (!g_hid.opened) hid_rescan_locked();
@@ -903,6 +912,8 @@ static int create_server(int port) {
 }
 
 static void handle_ctrl_client(int fd) {
+    mark_activity();
+
     char buf[4096];
     int n = (int)read(fd, buf, sizeof(buf)-1);
     if (n <= 0) { close(fd); return; }
@@ -939,6 +950,8 @@ static void ctrl_server_loop(int port) {
 
 // ── 简单 HTTP 响应 ────────────────────────────────────────
 static void http_handle(int fd) {
+    mark_activity();
+
     char buf[4096];
     int n = (int)read(fd, buf, sizeof(buf)-1);
     if (n <= 0) { close(fd); return; }
@@ -1045,15 +1058,19 @@ int main(int argc, char **argv) {
 
     int ctrl_port = CTRL_PORT;
     int http_port = HTTP_PORT;
+    int idle_exit = 1800;   // 默认闲置 30 分钟退出，0 表示常驻
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--ctrl-port") == 0 && i+1 < argc)
             ctrl_port = atoi(argv[++i]);
         else if (strcmp(argv[i], "--http-port") == 0 && i+1 < argc)
             http_port = atoi(argv[++i]);
+        else if (strcmp(argv[i], "--idle-exit") == 0 && i+1 < argc)
+            idle_exit = atoi(argv[++i]);
         else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0)
             ; // verbose mode - debug logs
     }
+    g_idle_exit_secs = idle_exit > 0 ? idle_exit : 0;
 
     fprintf(stderr, "[daemon] PromLight v0.3.1 (ARM64 native C)\n");
 
@@ -1089,11 +1106,22 @@ int main(int argc, char **argv) {
     pthread_create(&http_thread, NULL, (void* (*)(void*))http_server_loop, (void*)(intptr_t)http_port);
     pthread_detach(http_thread);
 
-    fprintf(stderr, "[daemon] Running (ctrl=%d, http=%d)\n", ctrl_port, http_port);
+    fprintf(stderr, "[daemon] Running (ctrl=%d, http=%d, idle-exit=%ds)\n",
+            ctrl_port, http_port, g_idle_exit_secs);
+
+    mark_activity();
 
     // 主循环：只为分发给 IOKit 的设备增删回调，不做任何轮询
     while (g_running) {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, false);
+
+        // 闲置超时退出，下次 hook 触发时再由 launchd 拉起
+        if (g_idle_exit_secs > 0 && g_last_activity > 0) {
+            if (time(NULL) - g_last_activity >= g_idle_exit_secs) {
+                fprintf(stderr, "[daemon] Idle for %ds, exiting\n", g_idle_exit_secs);
+                break;
+            }
+        }
     }
 
     pthread_mutex_lock(&g_hid.lock);

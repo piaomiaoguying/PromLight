@@ -99,6 +99,7 @@ print(f'Added {added} hook events to settings.json')
 # ── launchd 管理 ────────────────────────────────────────────
 cmd_launchd_install() {
     local plist_src="$DAEMON_DIR/com.promlight.daemon.plist"
+    local idle="${PROM_LIGHT_IDLE_EXIT:-1800}"
     # 用 wrapper 脚本启动，保证整个项目目录可以整体搬移
     cat > "$DAEMON_DIR/promlightd.sh" <<WRAPEOF
 #!/bin/bash
@@ -107,10 +108,12 @@ cmd_launchd_install() {
 # Uses \$(dirname "\$0") to locate the binary and config,
 # so the whole project directory can be moved freely.
 SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-exec "\$SCRIPT_DIR/promlightd" "\$@"
+exec "\$SCRIPT_DIR/promlightd" --idle-exit ${idle} "\$@"
 WRAPEOF
     chmod +x "$DAEMON_DIR/promlightd.sh"
 
+    # 按需启动：不开机自启、不保活。hook 检测到端口不通时用 kickstart 拉起，
+    # daemon 闲置 ${idle} 秒后自行退出。
     cat > "$plist_src" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -126,15 +129,17 @@ WRAPEOF
     <key>WorkingDirectory</key>
     <string>${DAEMON_DIR}</string>
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
     <key>KeepAlive</key>
-    <true/>
+    <false/>
+    <key>ProcessType</key>
+    <string>Interactive</string>
     <key>StandardOutPath</key>
     <string>${DAEMON_DIR}/daemon.log</string>
     <key>StandardErrorPath</key>
     <string>${DAEMON_DIR}/daemon.log</string>
     <key>ThrottleInterval</key>
-    <integer>5</integer>
+    <integer>1</integer>
 </dict>
 </plist>
 PLISTEOF
@@ -143,7 +148,7 @@ PLISTEOF
     launchctl bootout "gui/$(id -u)/com.promlight.daemon" 2>/dev/null || true
     sleep 1
     launchctl bootstrap "gui/$(id -u)" "$PLIST_DST"
-    info "launchd 已注册"
+    info "launchd 已注册（按需启动，闲置 ${idle}s 退出）"
 }
 
 cmd_launchd_uninstall() {
@@ -159,20 +164,26 @@ cmd_install() {
     cmd_install_hooks
     cmd_launchd_install
     echo ""
-    info "安装完成！daemon 已启动。"
+    info "安装完成！daemon 会在下一次 Claude Code 事件时自动启动。"
 }
 
 cmd_restart() {
     echo "重启 promlightd..."
     launchctl bootout "gui/$(id -u)/com.promlight.daemon" 2>/dev/null || true
     sleep 1
-    launchctl bootstrap "gui/$(id -u)" "$PLIST_DST" 2>/dev/null || {
+    if launchctl bootstrap "gui/$(id -u)" "$PLIST_DST" 2>/dev/null; then
+        # plist 已是按需启动（RunAtLoad=false），显式拉起进程
+        launchctl kickstart "gui/$(id -u)/com.promlight.daemon" 2>/dev/null || true
+        for _ in 1 2 3 4 5 6; do
+            nc -z -w 1 127.0.0.1 47800 2>/dev/null && break
+            sleep 0.5
+        done
+    else
         warn "launchd 未安装，直接启动..."
-        # 直接启动
         killall promlightd 2>/dev/null || true
         sleep 0.5
-        "$DAEMON_BIN" &
-    }
+        "$DAEMON_BIN" --idle-exit 0 &
+    fi
     info "daemon 已重启"
 }
 

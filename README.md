@@ -47,7 +47,7 @@ chmod +x promlight-init.sh
 
 1. 编译 `promlightd`（ARM64 原生二进制，~72KB）
 2. 安装 hook 脚本到 `~/.claude/scripts/promlight-hook.sh`
-3. 注册 launchd 开机自启（立即启动）
+3. 注册 launchd 服务（按需启动，不随开机自启）
 4. 配置 Claude Code 事件钩子到 `settings.json`
 
 > **项目可以放在任意路径**，安装脚本和 daemon 都通过相对路径定位，不受位置影响。
@@ -379,26 +379,34 @@ macOS ARM64 的 Python `hidapi` 对 BLE HID 设备调用 `IOHIDDeviceSetReport` 
 
 ## 管理
 
-#### 开机初始化序列
+#### 启动方式
 
-macOS 开机后 launchd 自动启动 daemon，信号灯会执行 `idle` 动画（三色渐变）。登录后执行以下完整的初始化流程（重启 daemon + 安装 hooks + 闪灯确认）：
+daemon **不随开机自启**，只在 Claude Code 触发 hook 时才启动：
+
+- hook 先探测 `127.0.0.1:47800`，端口通就直接发事件
+- 端口不通则 `launchctl kickstart` 拉起 daemon，等端口就绪后发送
+- 无任何事件 30 分钟后 daemon 自行退出，进程释放
+
+冷启动约 0.7~1s，只在会话第一条 hook 时付一次；hook 本身是 `async` 注册的，不会阻塞 Claude Code。
+
+改过 `events.json` 或重装 hook 后，执行一键脚本让它重新加载：
 
 ```bash
-cd /path/to/PromLight
-./promlight-init.sh restart
-./promlight-init.sh hooks
-sleep 3
-./promlight-init.sh status
-echo '{"cmd":"led all blink --only --count 5"}' | timeout 1 nc -w 1 127.0.0.1 47800 2>/dev/null || true
+./promlight-run.sh
 ```
 
-步骤说明：
+手动管理：
 
-1. **`restart`** — 重启 daemon，重新加载 `events.json`
-2. **`hooks`** — 重新安装 Claude Code hook 脚本和配置
-3. **`sleep 3`** — 等待 daemon 启动完成、蓝牙 HID 连接就绪
-4. **`status`** — 确认 daemon 运行正常
-5. **闪灯确认** — 三色灯同时闪烁 5 次后自动熄灭，表示初始化完成
+```bash
+launchctl kickstart gui/$(id -u)/com.promlight.daemon   # 立即启动
+launchctl bootout gui/$(id -u)/com.promlight.daemon     # 立即停止
+```
+
+调整闲置超时（默认 1800 秒，`0` 表示常驻）：
+
+```bash
+PROM_LIGHT_IDLE_EXIT=300 ./promlight-init.sh install
+```
 
 ### 手动管理
 
@@ -408,8 +416,8 @@ launchctl kickstart gui/$(id -u)/com.promlight.daemon   # 启动
 launchctl bootout gui/$(id -u)/com.promlight.daemon     # 停止
 launchctl list | grep promlight                         # 查看运行状态
 
-# 直接启动（调试）
-./native_daemon/promlightd -v
+# 直接启动（调试，不退出）
+./native_daemon/promlightd -v --idle-exit 0
 
 # 查看日志
 tail -f native_daemon/daemon.log
