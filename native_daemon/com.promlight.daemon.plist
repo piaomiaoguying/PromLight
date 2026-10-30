@@ -15,6 +15,10 @@
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/zs/工作/py/PromLight/native_daemon/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/zs/工作/py/PromLight/native_daemon/daemon.log</string>
     <key>ThrottleInterval</key>
     <integer>5</integer>
 </dict>

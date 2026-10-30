@@ -73,6 +73,8 @@ typedef struct {
     IOHIDManagerRef manager;
     pthread_mutex_t lock;
     bool opened;
+    volatile bool stale;         // 设备引用失效，需重新枚举
+    volatile bool need_restore;  // 设备打开后需重放灯态
 } HidCtx;
 
 typedef struct {
@@ -132,28 +134,105 @@ static Config g_config = {0};
 static SessionManager g_sessions = {0};
 static volatile bool g_running = true;
 
+// 最近一次成功下发的灯态，设备重连后据此重放
+static pthread_mutex_t g_state_lock = PTHREAD_MUTEX_INITIALIZER;
+static char g_last_cmd[MAX_LINE] = {0};
+
+// 串行化整段脚本下发，避免多个会话与重放交错写帧
+static pthread_mutex_t g_io_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static void io_lock(void)   { pthread_mutex_lock(&g_io_lock); }
+static void io_unlock(void) { pthread_mutex_unlock(&g_io_lock); }
+
+static void last_state_set(const char *cmd) {
+    if (!cmd || !*cmd) return;
+    pthread_mutex_lock(&g_state_lock);
+    strncpy(g_last_cmd, cmd, MAX_LINE-1);
+    g_last_cmd[MAX_LINE-1] = 0;
+    pthread_mutex_unlock(&g_state_lock);
+}
+
+static void apply_idle_state(void);
+static void restore_light_state(void);
+
 // ── HID I/O ────────────────────────────────────────────────
-static void hid_close_locked(void) {
+// 设备生命周期由 IOHIDManager 的 matched/removed 回调驱动，长期持有同样的
+// manager，不随设备断开而销毁。回调全部在主 runloop 上串行执行。
+static void hid_close_device_locked(void) {
     if (g_hid.device) {
         IOHIDDeviceClose(g_hid.device, kIOHIDOptionsTypeSeizeDevice);
+        CFRelease(g_hid.device);
         g_hid.device = NULL;
-    }
-    if (g_hid.manager) {
-        CFRelease(g_hid.manager);
-        g_hid.manager = NULL;
     }
     g_hid.opened = false;
 }
 
-static bool hid_open(void) {
-    pthread_mutex_lock(&g_hid.lock);
-    if (g_hid.opened && g_hid.device) {
-        pthread_mutex_unlock(&g_hid.lock);
-        return true;
+static void hid_attach_locked(IOHIDDeviceRef dev) {
+    if (g_hid.opened && g_hid.device == dev) return;
+    hid_close_device_locked();
+
+    IOReturn ret = IOHIDDeviceOpen(dev, kIOHIDOptionsTypeSeizeDevice);
+    if (ret != kIOReturnSuccess) {
+        fprintf(stderr, "[hid] Open failed: %d\n", ret);
+        return;
     }
 
+    // HIDIdleTime = 0
+    int idle = 0;
+    CFNumberRef idleNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &idle);
+    IOHIDDeviceSetProperty(dev, CFSTR("HIDIdleTime"), idleNum);
+    CFRelease(idleNum);
+
+    CFRetain(dev);
+    g_hid.device = dev;
+    g_hid.opened = true;
+    g_hid.need_restore = true;
+    fprintf(stderr, "[hid] Device opened\n");
+}
+
+// 当设备引用失效（发送失败）后，从 manager 取当前匹配设备重新打开
+static void hid_rescan_locked(void) {
+    if (!g_hid.manager) return;
+    CFSetRef devs = IOHIDManagerCopyDevices(g_hid.manager);
+    if (!devs) return;
+
+    IOHIDDeviceRef arr[8];
+    CFIndex n = CFSetGetCount(devs);
+    if (n > 8) n = 8;
+    if (n > 0) {
+        CFSetGetValues(devs, (const void**)arr);
+        for (CFIndex i = 0; i < n; i++) {
+            hid_attach_locked(arr[i]);
+            if (g_hid.opened) break;
+        }
+    }
+    CFRelease(devs);
+}
+
+static void hid_matched_cb(void *ctx, IOReturn result, void *sender, IOHIDDeviceRef dev) {
+    (void)ctx; (void)result; (void)sender;
+    pthread_mutex_lock(&g_hid.lock);
+    fprintf(stderr, "[hid] Device matched\n");
+    // 设备重连后会拿到新的 device 引用，必须换成新的才能继续下发
+    if (g_hid.device != dev) hid_attach_locked(dev);
+    pthread_mutex_unlock(&g_hid.lock);
+}
+
+static void hid_removed_cb(void *ctx, IOReturn result, void *sender, IOHIDDeviceRef dev) {
+    (void)ctx; (void)result; (void)sender;
+    pthread_mutex_lock(&g_hid.lock);
+    fprintf(stderr, "[hid] Device removed\n");
+    if (g_hid.device == dev) hid_close_device_locked();
+    pthread_mutex_unlock(&g_hid.lock);
+}
+
+// 创建并长期持有 manager，注册设备增删回调，然后主动枚举一次
+// 注意：在 spin runloop 期间不能持锁，否则会与 matched 回调死锁
+static bool hid_init(void) {
+    if (g_hid.manager) return g_hid.opened;
+
     g_hid.manager = IOHIDManagerCreate(kCFAllocatorDefault, 0);
-    if (!g_hid.manager) { pthread_mutex_unlock(&g_hid.lock); return false; }
+    if (!g_hid.manager) return false;
 
     CFMutableDictionaryRef dict = CFDictionaryCreateMutable(NULL, 2,
         &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -165,45 +244,28 @@ static bool hid_open(void) {
     CFRelease(nv); CFRelease(np);
 
     IOHIDManagerSetDeviceMatching(g_hid.manager, dict);
-    IOHIDManagerScheduleWithRunLoop(g_hid.manager, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
+    CFRelease(dict);
+
+    IOHIDManagerRegisterDeviceMatchingCallback(g_hid.manager, hid_matched_cb, NULL);
+    IOHIDManagerRegisterDeviceRemovalCallback(g_hid.manager, hid_removed_cb, NULL);
+    IOHIDManagerScheduleWithRunLoop(g_hid.manager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+
+    // 让 manager 完成首次枚举；设备已存在时 matched 回调通常会在这里把设备打开
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 1.0, false);
 
-    CFSetRef devs = IOHIDManagerCopyDevices(g_hid.manager);
-    if (!devs || CFSetGetCount(devs) == 0) {
-        fprintf(stderr, "[hid] No PromLight device found\n");
-        if (devs) CFRelease(devs);
-        CFRelease(g_hid.manager); g_hid.manager = NULL;
-        pthread_mutex_unlock(&g_hid.lock);
-        return false;
-    }
-
-    IOHIDDeviceRef dev = NULL;
-    CFSetGetValues(devs, (const void**)&dev);
-    IOReturn ret = IOHIDDeviceOpen(dev, kIOHIDOptionsTypeSeizeDevice);
-    if (ret != kIOReturnSuccess) {
-        fprintf(stderr, "[hid] Open failed: %d\n", ret);
-        CFRelease(devs); CFRelease(g_hid.manager); g_hid.manager = NULL;
-        pthread_mutex_unlock(&g_hid.lock);
-        return false;
-    }
-
-    // HIDIdleTime = 0
-    int idle = 0;
-    CFNumberRef idleNum = CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &idle);
-    IOHIDDeviceSetProperty(dev, CFSTR("HIDIdleTime"), idleNum);
-    CFRelease(idleNum);
-
-    g_hid.device = dev;
-    g_hid.opened = true;
-    CFRelease(devs);
-    fprintf(stderr, "[hid] Device opened\n");
+    pthread_mutex_lock(&g_hid.lock);
+    if (!g_hid.opened) hid_rescan_locked();
+    bool ok = g_hid.opened;
     pthread_mutex_unlock(&g_hid.lock);
-    return true;
+    return ok;
 }
 
 static bool hid_send(const uint8_t *data, int len) {
-    if (!g_hid.opened || !g_hid.device) return false;
     pthread_mutex_lock(&g_hid.lock);
+    if (!g_hid.opened || !g_hid.device) {
+        pthread_mutex_unlock(&g_hid.lock);
+        return false;
+    }
 
     uint8_t report[FRAME_SIZE];
     memset(report, 0, FRAME_SIZE);
@@ -212,15 +274,76 @@ static bool hid_send(const uint8_t *data, int len) {
 
     IOReturn ret = IOHIDDeviceSetReport(g_hid.device, kIOHIDReportTypeOutput, 2, report, FRAME_SIZE);
     bool ok = (ret == kIOReturnSuccess);
-    if (!ok) fprintf(stderr, "[hid] SetReport error: %d\n", ret);
+    if (!ok) {
+        fprintf(stderr, "[hid] SetReport error: %d, device stale\n", ret);
+        g_hid.stale = true;
+    }
 
     pthread_mutex_unlock(&g_hid.lock);
     return ok;
 }
 
-static void hid_reopen(void) {
-    hid_close_locked();
-    hid_open();
+// 检查当前持有的设备是否仍在 manager 的匹配集合里
+// BLE 掉线时设备可能不触发 removed 回调，只能靠这里的存活检查兜底
+static bool hid_device_present_locked(void) {
+    if (!g_hid.manager || !g_hid.device) return false;
+    CFSetRef devs = IOHIDManagerCopyDevices(g_hid.manager);
+    if (!devs) return false;
+    bool present = CFSetContainsValue(devs, g_hid.device);
+    CFRelease(devs);
+    return present;
+}
+
+// 主 runloop 每次唤醒时调用：清理失效引用、补齐设备、重放灯态
+static void hid_maintain(void) {
+    static time_t last_rescan = 0;
+    static time_t last_check = 0;
+
+    pthread_mutex_lock(&g_hid.lock);
+    bool need_rescan = g_hid.stale;
+    if (need_rescan) {
+        g_hid.stale = false;
+        fprintf(stderr, "[hid] Send failed, dropping stale device reference\n");
+        hid_close_device_locked();
+    }
+
+    // 设备已打开时每 5 秒确认一次它还在，防止掉线后继续往失效句柄写帧
+    if (g_hid.opened) {
+        time_t now = time(NULL);
+        if (now - last_check >= 5) {
+            last_check = now;
+            if (!hid_device_present_locked()) {
+                fprintf(stderr, "[hid] Device disappeared from IOKit\n");
+                hid_close_device_locked();
+            }
+        }
+    }
+
+    bool absent = !g_hid.opened;
+    pthread_mutex_unlock(&g_hid.lock);
+
+    // 发送失败后立即重扫；设备本就不可用时按 5 秒节流兜底枚举
+    bool do_rescan = need_rescan;
+    if (!do_rescan && absent) {
+        time_t now = time(NULL);
+        if (now - last_rescan >= 5) {
+            last_rescan = now;
+            do_rescan = true;
+        }
+    }
+
+    if (do_rescan) {
+        pthread_mutex_lock(&g_hid.lock);
+        hid_rescan_locked();
+        pthread_mutex_unlock(&g_hid.lock);
+    }
+
+    pthread_mutex_lock(&g_hid.lock);
+    bool restore = (g_hid.need_restore && g_hid.opened);
+    if (restore) g_hid.need_restore = false;
+    pthread_mutex_unlock(&g_hid.lock);
+
+    if (restore) restore_light_state();
 }
 
 // ── JSON 解析器（极简，仅解析扁平 key-value） ────────────────
@@ -248,7 +371,6 @@ static char *json_get_string(const char *json, const char *key, char *out, int o
 
 static bool json_get_bool(const char *json, const char *key, bool def) {
     if (!json) return def;
-    char val[16] = {0};
     char pattern[MAX_LINE];
     snprintf(pattern, sizeof(pattern), "\"%s\"", key);
     const char *p = strstr(json, pattern);
@@ -727,31 +849,11 @@ static void session_release(const char *id) {
     pthread_mutex_unlock(&g_sessions.lock);
 }
 
-static int session_active_count(void) {
-    int n = 0;
-    pthread_mutex_lock(&g_sessions.lock);
-    for (int i = 0; i < g_sessions.count; i++)
-        if (g_sessions.sessions[i].active) n++;
-    pthread_mutex_unlock(&g_sessions.lock);
-    return n;
-}
-
-static void apply_idle_state(void) {
-    // All off first
-    uint8_t off_frame[16];
-    uint8_t payload[2] = {CH_ALL, ACT_OFF};
-    int off_len = pack_frame(CMD_LED, payload, 2, off_frame);
-    hid_send(off_frame, off_len);
-    usleep(50000);
-
-    // Get idle command from config
-    const char *idle_cmd = config_resolve_macro(&g_config, "idle");
-    if (!idle_cmd || strcmp(idle_cmd, "idle") == 0) {
-        idle_cmd = "led green blink --only";
-    }
-
+// 执行一段北向命令；调用方需已持有 io 锁
+static void run_script_unlocked(const char *cmd) {
     Script script;
-    compile_script(idle_cmd, &script);
+    compile_script(cmd, &script);
+
     for (int i = 0; i < script.count; i++) {
         if (script.steps[i].type == STEP_FRAME) {
             hid_send(script.steps[i].frame.data, script.steps[i].frame.len);
@@ -760,6 +862,50 @@ static void apply_idle_state(void) {
         }
         usleep(50000);
     }
+}
+
+static void apply_idle_state(void) {
+    const char *idle_cmd = config_resolve_macro(&g_config, "idle");
+    if (!idle_cmd || strcmp(idle_cmd, "idle") == 0) {
+        idle_cmd = "led green blink --only";
+    }
+    char cmd[MAX_LINE];
+    strncpy(cmd, idle_cmd, MAX_LINE-1);
+    cmd[MAX_LINE-1] = 0;
+
+    io_lock();
+    // All off first
+    uint8_t off_frame[16];
+    uint8_t payload[2] = {CH_ALL, ACT_OFF};
+    int off_len = pack_frame(CMD_LED, payload, 2, off_frame);
+    hid_send(off_frame, off_len);
+    usleep(50000);
+
+    run_script_unlocked(cmd);
+    io_unlock();
+
+    last_state_set(cmd);
+}
+
+// ── 灯态重放 ──────────────────────────────────────────────
+// 设备断开期间灯会保持最后一帧，重连后把最后一个有效灯态重新发一遍
+static void restore_light_state(void) {
+    char cmd[MAX_LINE];
+    pthread_mutex_lock(&g_state_lock);
+    strncpy(cmd, g_last_cmd, MAX_LINE-1);
+    cmd[MAX_LINE-1] = 0;
+    pthread_mutex_unlock(&g_state_lock);
+
+    if (!cmd[0]) {
+        apply_idle_state();
+        return;
+    }
+
+    fprintf(stderr, "[hid] Restoring light state: %s\n", cmd);
+
+    io_lock();
+    run_script_unlocked(cmd);
+    io_unlock();
 }
 
 // ── 消息处理 ──────────────────────────────────────────────
@@ -792,12 +938,7 @@ static void handle_message(const char *json_raw, int fd) {
 
     if (release) {
         session_release(session);
-
-        if (session_active_count() > 0) {
-            apply_idle_state();
-        } else {
-            apply_idle_state();
-        }
+        apply_idle_state();
 
         snprintf(result, sizeof(result),
                  "{\"ok\":true,\"ack\":\"✓\",\"device\":\"\",\"cmd\":\"%s\"}\n", cmd);
@@ -808,14 +949,12 @@ static void handle_message(const char *json_raw, int fd) {
 
         fprintf(stderr, "[msg] session=%s cmd=%s -> %d steps\n", session, resolved_cmd, script.count);
 
-        for (int i = 0; i < script.count; i++) {
-            if (script.steps[i].type == STEP_FRAME) {
-                hid_send(script.steps[i].frame.data, script.steps[i].frame.len);
-            } else if (script.steps[i].type == STEP_DELAY) {
-                usleep(script.steps[i].delay_ms * 1000);
-            }
-            usleep(50000);
-        }
+        // 先记住目标灯态：即便本次发送失败，设备重新打开后也会补发这一帧
+        last_state_set(resolved_cmd);
+
+        io_lock();
+        run_script_unlocked(resolved_cmd);
+        io_unlock();
 
         session_set(session, resolved_cmd);
 
@@ -906,21 +1045,27 @@ static void http_handle(int fd) {
             "\r\n"
             "{\"status\":\"ok\",\"message\":\"PromLight daemon\"}");
     } else if (strcmp(path, "/api/status") == 0) {
+        pthread_mutex_lock(&g_hid.lock);
+        int opened = g_hid.opened ? 1 : 0;
+        pthread_mutex_unlock(&g_hid.lock);
         rlen = snprintf(resp, sizeof(resp),
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: application/json\r\n"
             "Connection: close\r\n"
             "\r\n"
-            "{\"bluetooth\":true,\"count\":1,\"opened\":%d,\"version\":\"0.3.0-c\"}",
-            g_hid.opened ? 1 : 0);
+            "{\"bluetooth\":true,\"count\":1,\"opened\":%d,\"version\":\"0.3.1-c\"}",
+            opened);
     } else if (strcmp(path, "/api/devices") == 0) {
+        pthread_mutex_lock(&g_hid.lock);
+        int opened = g_hid.opened ? 1 : 0;
+        pthread_mutex_unlock(&g_hid.lock);
         rlen = snprintf(resp, sizeof(resp),
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: application/json\r\n"
             "Connection: close\r\n"
             "\r\n"
             "[{\"mac\":\"9C7F643B3B39\",\"label\":\"PromLight\",\"opened\":%d}]",
-            g_hid.opened ? 1 : 0);
+            opened);
     } else if (strcmp(path, "/api/config") == 0) {
         // Return loaded macros info
         char macros_json[2048] = {0};
@@ -973,7 +1118,9 @@ static void http_server_loop(int port) {
 static void handle_signal(int sig) {
     fprintf(stderr, "[daemon] Signal %d, shutting down...\n", sig);
     g_running = false;
-    hid_close_locked();
+    pthread_mutex_lock(&g_hid.lock);
+    hid_close_device_locked();
+    pthread_mutex_unlock(&g_hid.lock);
     exit(0);
 }
 
@@ -995,7 +1142,10 @@ int main(int argc, char **argv) {
             ; // verbose mode - debug logs
     }
 
-    fprintf(stderr, "[daemon] PromLight v0.3.0 (ARM64 native C)\n");
+    fprintf(stderr, "[daemon] PromLight v0.3.1 (ARM64 native C)\n");
+
+    pthread_mutex_init(&g_hid.lock, NULL);
+    pthread_mutex_init(&g_sessions.lock, NULL);
 
     // Fix working directory to find events.json
     char self_dir[MAX_PATH];
@@ -1009,17 +1159,18 @@ int main(int argc, char **argv) {
     // Load config
     config_load(&g_config);
 
-    // Open HID device
-    if (!hid_open()) {
-        // Retry once
-        sleep(1);
-        if (!hid_open()) {
-            fprintf(stderr, "[daemon] Failed to open HID device, continuing...\n");
-        }
+    // 建立常驻 IOHIDManager 并注册设备增删回调（设备未连接时也继续运行）
+    if (!hid_init()) {
+        fprintf(stderr, "[daemon] PromLight not present yet, waiting for it to appear\n");
     }
 
-    // Apply idle state
-    apply_idle_state();
+    // Apply idle state（仅在设备已打开时，否则等重连回调触发重放）
+    if (g_hid.opened) {
+        pthread_mutex_lock(&g_hid.lock);
+        g_hid.need_restore = false;  // 紧接着就要直接下发 idle，无需再重放
+        pthread_mutex_unlock(&g_hid.lock);
+        apply_idle_state();
+    }
 
     // Start HTTP and CTRL servers
     fprintf(stderr, "[daemon] Starting servers...\n");
@@ -1032,12 +1183,15 @@ int main(int argc, char **argv) {
 
     fprintf(stderr, "[daemon] Running (ctrl=%d, http=%d)\n", ctrl_port, http_port);
 
-    // Main loop - keep runloop for IOKit callbacks
+    // 主循环：runloop 分发给 IOKit 回调，每次唤醒顺手做一次自愈检查
     while (g_running) {
         CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, false);
+        hid_maintain();
     }
 
-    hid_close_locked();
+    pthread_mutex_lock(&g_hid.lock);
+    hid_close_device_locked();
+    pthread_mutex_unlock(&g_hid.lock);
     fprintf(stderr, "[daemon] Bye!\n");
     return 0;
 }

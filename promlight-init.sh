@@ -99,6 +99,18 @@ print(f'Added {added} hook events to settings.json')
 # ── launchd 管理 ────────────────────────────────────────────
 cmd_launchd_install() {
     local plist_src="$DAEMON_DIR/com.promlight.daemon.plist"
+    # 用 wrapper 脚本启动，保证整个项目目录可以整体搬移
+    cat > "$DAEMON_DIR/promlightd.sh" <<WRAPEOF
+#!/bin/bash
+# promlightd.sh - Launchd wrapper for promlightd
+#
+# Uses \$(dirname "\$0") to locate the binary and config,
+# so the whole project directory can be moved freely.
+SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
+exec "\$SCRIPT_DIR/promlightd" "\$@"
+WRAPEOF
+    chmod +x "$DAEMON_DIR/promlightd.sh"
+
     cat > "$plist_src" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -109,7 +121,7 @@ cmd_launchd_install() {
     <string>com.promlight.daemon</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${DAEMON_BIN}</string>
+        <string>${DAEMON_DIR}/promlightd.sh</string>
     </array>
     <key>WorkingDirectory</key>
     <string>${DAEMON_DIR}</string>

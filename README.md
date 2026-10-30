@@ -367,6 +367,7 @@ HID 报告长度固定 64 字节，不足部分补 `0x00`。
 
 - **纯 C 实现**，直接调用 IOKit 框架的 `IOHIDDeviceSetReport`，不走系统蓝牙抽象层
 - **64 字节固定报告长度** + `kIOHIDOptionsTypeSeizeDevice` 独占模式
+- **设备热插拔自愈**：常驻 `IOHIDManager` 监听设备增删，蓝牙断连后自动失效旧引用、重连后重开设备并重放最后灯态
 - **多 session 管理**：支持同时管理多个 AI 工具的灯色状态，最后一个 session 释放后自动回到 idle
 - **ARM64 only**：当前仅支持 Apple Silicon Mac，需要 Rosetta 2 的原版 daemon 见下方 FAQ
 
@@ -462,6 +463,17 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.promlight.daemon.pli
 ### 蓝牙找不到设备？
 
 确认 PromLight 已在系统蓝牙中配对：`系统设置 → 蓝牙 → PromLight → 已连接`。
+
+### 蓝牙断开后回来，灯不亮？
+
+daemon 会长期持有 IOHIDManager 并监听设备增删；蓝牙断开时标记设备离线，重连后自动重新打开设备并重放最后一个灯态。
+
+排查：
+
+```bash
+curl -s http://127.0.0.1:7800/api/status   # opened=0 表示设备当前不在线
+grep '\[hid\]' native_daemon/daemon.log     # 查看 matched / removed / Restoring
+```
 
 ### 想改灯色？
 
